@@ -18,7 +18,7 @@ const PERIODOS = [
 ]
 
 export default function ConsultaPanel() {
-  const { freq, refresh } = useStoreData()
+  const { freq } = useStoreData()
   const [periodo, setPeriodo] = useState("todos")
   const [fecha, setFecha] = useState("")
   const [familias, setFamilias] = useState([...FAMILIAS])
@@ -198,16 +198,7 @@ export default function ConsultaPanel() {
                   <td>
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={async () => {
-                        if (confirm("¿Estás seguro de que deseas eliminar este registro?")) {
-                          try {
-                            await deleteFrecuencia(r.id);
-                            refresh();
-                          } catch (err) {
-                            alert(err.message || "Error al eliminar el registro.");
-                          }
-                        }
-                      }}
+                      onClick={() => deleteFrecuencia(r.id)}
                       aria-label="Eliminar"
                     >
                       <Trash2 size={15} />

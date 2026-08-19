@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback } from "react"
+import { useMemo, useState } from "react"
 import { Save, CalendarDays } from "lucide-react"
 import { FAMILIAS, COMPONENTES, MAQUINAS, getCaracteristicas } from "../../data/catalog.js"
 import { getDayName, todayISO } from "../../utils/dates.js"
@@ -12,7 +12,6 @@ import {
   round,
 } from "../../utils/metrics.js"
 import { addFrecuencia, buildFrecuenciaRecord } from "../../data/store.js"
-import { useStoreData } from "../../hooks/useStoreData.js"
 
 const EMPTY = {
   familia: "",
@@ -31,9 +30,6 @@ const EMPTY = {
 export default function CapturaForm() {
   const [form, setForm] = useState(EMPTY)
   const [saved, setSaved] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState(null)
-  const { refresh } = useStoreData()
 
   const caracteristicas = useMemo(
     () => getCaracteristicas(form.familia, form.componente),
@@ -73,22 +69,13 @@ export default function CapturaForm() {
     form.frecuencia &&
     form.medicionesInfinity !== ""
 
-  const handleSubmit = useCallback(async (e) => {
+  function handleSubmit(e) {
     e.preventDefault()
-    if (!valid || saving) return
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await addFrecuencia(buildFrecuenciaRecord(form))
-      setForm({ ...EMPTY, fecha: form.fecha, familia: form.familia, componente: form.componente, maquina: form.maquina })
-      setSaved(true)
-      refresh()
-    } catch (err) {
-      setSaveError(err.message || "Error al guardar. Verifica la conexión con el servidor.")
-    } finally {
-      setSaving(false)
-    }
-  }, [valid, saving, form, refresh])
+    if (!valid) return
+    addFrecuencia(buildFrecuenciaRecord(form))
+    setForm({ ...EMPTY, fecha: form.fecha, familia: form.familia, componente: form.componente, maquina: form.maquina })
+    setSaved(true)
+  }
 
   return (
     <form className="card" onSubmit={handleSubmit}>
@@ -302,15 +289,11 @@ export default function CapturaForm() {
         </div>
 
         <div className="row-between mt-6">
-          <span className="text-muted" style={{ fontSize: 13, color: saveError ? "var(--sem-red)" : undefined }}>
-            {saveError
-              ? saveError
-              : saved
-              ? "✓ Registro guardado correctamente."
-              : "Completa los campos requeridos (*)."}
+          <span className="text-muted" style={{ fontSize: 13 }}>
+            {saved ? "Registro guardado correctamente." : "Completa los campos requeridos (*)."}
           </span>
-          <button type="submit" className="btn btn-primary" disabled={!valid || saving}>
-            <Save size={16} /> {saving ? "Guardando..." : "Guardar registro"}
+          <button type="submit" className="btn btn-primary" disabled={!valid}>
+            <Save size={16} /> Guardar registro
           </button>
         </div>
       </div>
