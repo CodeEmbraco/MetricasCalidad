@@ -1,10 +1,7 @@
-import { useMemo, useState } from "react"
-import { FileSpreadsheet, Trash2, Filter } from "lucide-react"
-import { FAMILIAS, COMPONENTES } from "../../data/catalog.js"
-import { useStoreData } from "../../hooks/useStoreData.js"
-import { deleteFrecuencia } from "../../data/store.js"
+import { useMemo, useState, useEffect } from "react"
+import { FileSpreadsheet, Trash2, Filter, RefreshCw } from "lucide-react"
 import { semaforoFrecuencia } from "../../utils/metrics.js"
-import { getISOWeek, getISOWeekYear, groupKey, formatDateDisplay, getDayName } from "../../utils/dates.js"
+import { getISOWeek, getISOWeekYear, groupKey, getDayName, todayISO } from "../../utils/dates.js"
 import Semaforo from "../../components/Semaforo.jsx"
 import MultiSelect from "../../components/MultiSelect.jsx"
 import { exportTable } from "../../utils/excel.js"
@@ -17,43 +14,155 @@ const PERIODOS = [
   { id: "anio", label: "Año" },
 ]
 
+// Helper para obtener la semana actual en formato ISO (ej. "2026-W35")
+function getSemanaActualISO() {
+  const hoy = new Date()
+  // Convertimos a string YYYY-MM-DD para evitar el error con parseDate
+  const hoyStr = hoy.toISOString().split("T")[0]
+  
+  const year = getISOWeekYear(hoyStr)
+  const week = getISOWeek(hoyStr)
+  const weekStr = String(week).padStart(2, "0")
+  
+  return `${year}-W${weekStr}`
+}
+
+// Formatea fechas ISO "YYYY-MM-DD..." a formato legible "DD/MM/YYYY" de forma segura
+function formatFechaSQL(fechaStr) {
+  if (!fechaStr) return "-"
+  const fechaLimpia = String(fechaStr).substring(0, 10)
+  const partes = fechaLimpia.split("-")
+  if (partes.length !== 3) return "-"
+  const [year, month, day] = partes
+  return `${day}/${month}/${year}`
+}
+
 export default function ConsultaPanel() {
-  const { freq } = useStoreData()
-  const [periodo, setPeriodo] = useState("todos")
-  const [fecha, setFecha] = useState("")
-  const [familias, setFamilias] = useState([...FAMILIAS])
-  const [componentes, setComponentes] = useState([...COMPONENTES])
+  // ESTADOS DE DATOS REALES DE SQL SERVER
+  const [freq, setFreq] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  // PERÍODO POR DEFECTO: "semana" con la semana actual en curso
+  const [periodo, setPeriodo] = useState("semana")
+  const [fecha, setFecha] = useState(getSemanaActualISO())
+
+  // ESTADOS DE FILTROS SELECCIONADOS
+  const [familias, setFamilias] = useState([])
+  const [componentes, setComponentes] = useState([])
   const [caracteristicas, setCaracteristicas] = useState([])
 
+  // 1. Cargar historial desde la API (GET /api/frecuencias/historial)
+  const fetchHistorial = () => {
+    setLoading(true)
+    setError(null)
+    fetch("http://localhost:3001/api/frecuencias/historial")
+      .then((res) => {
+        if (!res.ok) throw new Error("Error al consultar el historial de la base de datos")
+        return res.json()
+      })
+      .then((data) => {
+        setFreq(data)
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error("Error API Historial:", err)
+        setError("No se pudieron obtener los datos de SQL Server")
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchHistorial()
+  }, [])
+
+  // 2. Extraer Familias únicas disponibles en los datos reales
+  const familiasOptions = useMemo(() => {
+    const set = new Set(freq.map((r) => r.familia).filter(Boolean))
+    return Array.from(set).sort()
+  }, [freq])
+
+  // Inicializar filtro de familias cuando cargan los datos por primera vez
+  useEffect(() => {
+    if (familiasOptions.length > 0 && familias.length === 0) {
+      setFamilias(familiasOptions)
+    }
+  }, [familiasOptions])
+
+  // 3. Extraer Componentes únicos pertenecientes a las familias seleccionadas
+  const componentesOptions = useMemo(() => {
+    const set = new Set(
+      freq
+        .filter((r) => familias.length === 0 || familias.includes(r.familia))
+        .map((r) => r.componente)
+        .filter(Boolean)
+    )
+    return Array.from(set).sort()
+  }, [freq, familias])
+
+  useEffect(() => {
+    setComponentes(componentesOptions)
+  }, [componentesOptions])
+
+  // 4. Extraer Características únicas filtradas por familias y componentes elegidos
   const caracOptions = useMemo(() => {
     const set = new Set(
       freq
-        .filter((r) => familias.includes(r.familia) && componentes.includes(r.componente))
-        .map((r) => r.caracteristica),
+        .filter(
+          (r) =>
+            (familias.length === 0 || familias.includes(r.familia)) &&
+            (componentes.length === 0 || componentes.includes(r.componente))
+        )
+        .map((r) => r.caracteristica)
+        .filter(Boolean)
     )
     return Array.from(set).sort()
   }, [freq, familias, componentes])
 
+  // 5. Filtrado de registros para la tabla
   const filtered = useMemo(() => {
     return freq.filter((r) => {
-      if (!familias.includes(r.familia)) return false
-      if (!componentes.includes(r.componente)) return false
+      if (familias.length > 0 && !familias.includes(r.familia)) return false
+      if (componentes.length > 0 && !componentes.includes(r.componente)) return false
       if (caracteristicas.length > 0 && !caracteristicas.includes(r.caracteristica)) return false
+
       if (periodo !== "todos" && fecha) {
-        if (periodo === "dia" && r.fecha !== fecha) return false
+        // Normaliza la fecha de la fila a string YYYY-MM-DD
+        const fechaFila = String(r.fecha).substring(0, 10)
+
+        if (periodo === "dia" && fechaFila !== fecha) return false
         if (periodo === "semana") {
-          const [y, w] = [getISOWeekYear(r.fecha), getISOWeek(r.fecha)]
-          const sel = fecha
-          const [selY, selW] = sel.split("-W").map(Number)
+          const [y, w] = [getISOWeekYear(fechaFila), getISOWeek(fechaFila)]
+          const [selY, selW] = fecha.split("-W").map(Number)
           if (y !== selY || w !== selW) return false
         }
-        if (periodo === "mes" && groupKey(r.fecha, "mes") !== fecha) return false
-        if (periodo === "anio" && groupKey(r.fecha, "anio") !== fecha) return false
+        if (periodo === "mes" && groupKey(fechaFila, "mes") !== fecha) return false
+        if (periodo === "anio" && groupKey(fechaFila, "anio") !== fecha) return false
       }
       return true
     })
   }, [freq, familias, componentes, caracteristicas, periodo, fecha])
 
+  // 6. Función para eliminar registros en SQL Server (DELETE /api/frecuencias/:id)
+  async function handleDelete(id) {
+    if (!window.confirm("¿Estás seguro de que deseas eliminar este registro de la base de datos?")) return
+
+    try {
+      const res = await fetch(`http://localhost:3001/api/frecuencias/${id}`, {
+        method: "DELETE",
+      })
+
+      if (!res.ok) throw new Error("No se pudo eliminar el registro")
+
+      // Actualizar el estado local para quitar la fila inmediatamente
+      setFreq((prev) => prev.filter((r) => r.id !== id))
+    } catch (err) {
+      console.error(err)
+      alert("Hubo un error al eliminar el registro en la base de datos.")
+    }
+  }
+
+  // 7. Exportación a Excel
   async function handleExport() {
     await exportTable({
       filename: "frecuencia_medicion.xlsx",
@@ -63,15 +172,14 @@ export default function ConsultaPanel() {
         { header: "Familia", key: "familia", width: 18 },
         { header: "Componente", key: "componente", width: 14 },
         { header: "Característica", key: "caracteristica", width: 32 },
-        { header: "Máquina", key: "maquina", width: 16 }, // Columna agregada al reporte Excel
-        { header: "Fecha", width: 12, value: (r) => formatDateDisplay(r.fecha) },
+        { header: "Máquina", key: "maquina", width: 16 },
+        { header: "Fecha", width: 12, value: (r) => formatFechaSQL(r.fecha) },
         { header: "Mediciones Infinity", key: "medicionesInfinity", width: 16 },
         { header: "Total Muestras", key: "totalMuestras", width: 14 },
         { header: "% Frecuencia", width: 14, sem: "freq", value: (r) => `${r.porcentaje}%` },
-        { header: "Rate", key: "rate", width: 10 },
       ],
       rows: filtered,
-      getSemEstado: (r) => semaforoFrecuencia(r.porcentaje),
+      getSemEstado: (r) => r.estado || semaforoFrecuencia(r.porcentaje),
     })
   }
 
@@ -80,20 +188,35 @@ export default function ConsultaPanel() {
       {/* Filtros */}
       <div className="card mb-4">
         <div className="card-header">
-          <div className="row" style={{ gap: 8 }}>
-            <Filter size={16} />
-            <h3>Filtros</h3>
+          <div className="row-between" style={{ width: "100%" }}>
+            <div className="row" style={{ gap: 8 }}>
+              <Filter size={16} />
+              <h3>Filtros de Consulta</h3>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={fetchHistorial} title="Actualizar datos">
+              <RefreshCw size={14} className={loading ? "spin" : ""} />
+            </button>
           </div>
         </div>
         <div className="card-body">
           <div className="filter-bar">
+            {/* Filtro Período */}
             <div className="field">
               <label>Período</label>
               <select
                 value={periodo}
                 onChange={(e) => {
-                  setPeriodo(e.target.value)
-                  setFecha("")
+                  const nuevoPeriodo = e.target.value
+                  setPeriodo(nuevoPeriodo)
+
+                  // Asignación de fecha por defecto según el período
+                  if (nuevoPeriodo === "semana") {
+                    setFecha(getSemanaActualISO())
+                  } else if (nuevoPeriodo === "dia") {
+                    setFecha(todayISO())
+                  } else {
+                    setFecha("")
+                  }
                 }}
               >
                 {PERIODOS.map((p) => (
@@ -138,8 +261,21 @@ export default function ConsultaPanel() {
               </div>
             )}
 
-            <MultiSelect label="Familia" options={FAMILIAS} value={familias} onChange={setFamilias} />
-            <MultiSelect label="Componente" options={COMPONENTES} value={componentes} onChange={setComponentes} />
+            {/* MultiSelects Dinámicos con datos de SQL */}
+            <MultiSelect
+              label="Familia"
+              options={familiasOptions}
+              value={familias}
+              onChange={setFamilias}
+              placeholder="Todas"
+            />
+            <MultiSelect
+              label="Componente"
+              options={componentesOptions}
+              value={componentes}
+              onChange={setComponentes}
+              placeholder="Todos"
+            />
             <MultiSelect
               label="Característica"
               options={caracOptions}
@@ -151,16 +287,19 @@ export default function ConsultaPanel() {
         </div>
       </div>
 
-      {/* Resultados */}
+      {/* Contador y Exportación */}
       <div className="row-between mb-4">
         <span className="text-muted" style={{ fontSize: 13 }}>
-          {filtered.length} registro(s) encontrados
+          {loading ? "Cargando..." : `${filtered.length} registro(s) encontrados`}
         </span>
         <button className="btn btn-excel" onClick={handleExport} disabled={filtered.length === 0}>
           <FileSpreadsheet size={16} /> Exportar a Excel
         </button>
       </div>
 
+      {error && <div className="card p-4 style-error mb-4">{error}</div>}
+
+      {/* Tabla de Registros */}
       <div className="table-wrap">
         <table>
           <thead>
@@ -168,37 +307,35 @@ export default function ConsultaPanel() {
               <th>Familia</th>
               <th>Componente</th>
               <th>Característica</th>
-              <th>Máquina</th> {/* Cabecera de Columna agregada */}
+              <th>Máquina</th>
               <th>Fecha</th>
               <th>Mediciones Infinity</th>
               <th>Total Muestras</th>
               <th>% Frecuencia</th>
-              <th>Rate</th>
               <th>Semáforo</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {filtered.map((r) => {
-              const estado = semaforoFrecuencia(r.porcentaje)
+              const estado = r.estado || semaforoFrecuencia(r.porcentaje)
               return (
                 <tr key={r.id}>
                   <td>{r.familia}</td>
                   <td>{r.componente}</td>
                   <td>{r.caracteristica}</td>
-                  <td style={{ fontWeight: "500" }}>{r.maquina || "-"}</td> {/* Mapeo de celda Máquina */}
-                  <td>{formatDateDisplay(r.fecha)}</td>
+                  <td style={{ fontWeight: "500" }}>{r.maquina || "-"}</td>
+                  <td>{formatFechaSQL(r.fecha)}</td>
                   <td>{r.medicionesInfinity}</td>
                   <td>{r.totalMuestras}</td>
-                  <td className={`sem-cell-${estado}`}>{r.porcentaje}%</td>
-                  <td>{r.rate}</td>
+                  <td className={`sem-cell-${estado}`}>{Math.round(r.porcentaje)}%</td>
                   <td>
                     <Semaforo estado={estado} />
                   </td>
                   <td>
                     <button
                       className="btn btn-ghost btn-sm"
-                      onClick={() => deleteFrecuencia(r.id)}
+                      onClick={() => handleDelete(r.id)}
                       aria-label="Eliminar"
                     >
                       <Trash2 size={15} />
@@ -207,10 +344,10 @@ export default function ConsultaPanel() {
                 </tr>
               )
             })}
-            {filtered.length === 0 && (
+            {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan={11}>
-                  <div className="empty-state">No hay registros que coincidan con los filtros.</div>
+                <td colSpan={10}>
+                  <div className="empty-state">No hay registros guardados que coincidan con los filtros.</div>
                 </td>
               </tr>
             )}

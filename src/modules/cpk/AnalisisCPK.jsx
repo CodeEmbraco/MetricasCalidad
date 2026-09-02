@@ -1,10 +1,8 @@
-import { useMemo, useState } from "react"
-import { FileSpreadsheet } from "lucide-react"
+import { useMemo, useState, useEffect } from "react"
+import { FileSpreadsheet, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react" // <--- Agregados íconos de navegación
 import AdvancedFilters, { defaultFilterState, applyFilters } from "../../components/AdvancedFilters.jsx"
-import { useStoreData } from "../../hooks/useStoreData.js"
 import { semaforoCPK, round } from "../../utils/metrics.js"
 import { groupKey, groupLabel } from "../../utils/dates.js"
-import Semaforo from "../../components/Semaforo.jsx"
 import CpkTrendChart from "../../components/charts/CpkTrendChart.jsx"
 import CpkDetailView from "./CpkDetailView.jsx"
 import { exportMatrixReport } from "../../utils/excel.js"
@@ -14,14 +12,80 @@ import { renderCpkStackedBars } from "../../utils/chartImage.js"
 import { LineChart, Line, YAxis, ReferenceLine, ResponsiveContainer } from "recharts"
 
 export default function AnalisisCPK() {
-  const { cpk } = useStoreData()
+  // Estados para consumo de API SQL Server (InfinityQS)
+  const [cpk, setCpk] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
   const [filters, setFilters] = useState(defaultFilterState())
   const [detail, setDetail] = useState(null)
   const [hover, setHover] = useState(null) // { record, x, y }
 
-  const filtered = useMemo(() => applyFilters(cpk, filters), [cpk, filters])
+  // 1. ESTADOS DE PAGINACIÓN
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
 
-  // 1. Columnas de tiempo dinámicas únicas presentes en el segmento filtrado (Eje X)
+  // Helper para formatear YYYY-MM-DD sin desfase UTC por zona horaria
+  function formatLocalDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  }
+
+  // Obtener rango exacto de la semana
+  function getRangoSemana(offsetSemanas = 0) {
+    const hoy = new Date();
+    const dayOfWeek = hoy.getDay() === 0 ? 7 : hoy.getDay(); 
+    
+    const lunes = new Date(hoy);
+    lunes.setDate(hoy.getDate() - dayOfWeek + 1 + (offsetSemanas * 7));
+    
+    const domingo = new Date(lunes);
+    domingo.setDate(lunes.getDate() + 6);
+
+    return {
+      fechaInicio: formatLocalDate(lunes),
+      fechaFin: formatLocalDate(domingo)
+    };
+  }
+
+  // Petición a la API del Backend en Express
+  const fetchCpkData = () => {
+    setLoading(true)
+    setError(null)
+
+    const { fechaInicio, fechaFin } = getRangoSemana(-1); 
+    const fInicio = filters.desde || fechaInicio;
+    const fFin = filters.hasta || fechaFin;
+
+    const url = `http://localhost:3001/api/cpk/getCpk?fechaInicio=${fInicio}&fechaFin=${fFin}`;
+
+    fetch(url)
+      .then((res) => {
+        if (!res.ok) throw new Error("Error al consultar Cpk de InfinityQS")
+        return res.json()
+      })
+      .then((data) => {
+        setCpk(data)
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error("Error API Cpk:", err)
+        setError("No se pudieron cargar los datos de capacidad (Cpk) desde InfinityQS.")
+        setLoading(false)
+      })
+  }
+
+  useEffect(() => {
+    fetchCpkData()
+  }, [filters.desde, filters.hasta])
+
+  const filtered = useMemo(() => {
+    return applyFilters(cpk, filters)
+  }, [cpk, filters])
+
+  // Columnas de tiempo dinámicas únicas (Eje X)
   const timeColumns = useMemo(() => {
     const keysMap = new Map()
     filtered.forEach((r) => {
@@ -33,7 +97,7 @@ export default function AnalisisCPK() {
     return Array.from(keysMap.values()).sort((a, b) => (a.key < b.key ? -1 : 1))
   }, [filtered, filters.group])
 
-  // 2. Agrupación porcentual acumulada para renderizar la gráfica de barras al 100%
+  // Agrupación porcentual acumulada
   const trendData = useMemo(() => {
     const segments = new Map()
     timeColumns.forEach(col => {
@@ -60,7 +124,7 @@ export default function AnalisisCPK() {
     }))
   }, [filtered, timeColumns])
 
-  // 3. Transformación matricial agrupada por Familia + Componente + Característica + Máquina
+  // Transformación matricial completa
   const matrixRows = useMemo(() => {
     const map = new Map()
     filtered.forEach((r) => {
@@ -71,8 +135,8 @@ export default function AnalisisCPK() {
           familia: r.familia,
           componente: r.componente,
           caracteristica: r.caracteristica,
-          maquina: maq, // Almacenamos la máquina asignada al renglón
-          valoresPorPeriodo: {}, // [timeKey]: r
+          maquina: maq,
+          valoresPorPeriodo: {},
         })
       }
       const tKey = groupKey(r.fecha, filters.group)
@@ -80,6 +144,19 @@ export default function AnalisisCPK() {
     })
     return Array.from(map.values())
   }, [filtered, filters.group])
+
+  // 2. REINICIAR A PÁGINA 1 CUANDO CAMBIEN LOS FILTROS O LA MATRIZ
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [matrixRows.length])
+
+  // 3. RECORTAR 'matrixRows' PARA OBTENER LA PÁGINA ACTUAL
+  const totalPages = Math.ceil(matrixRows.length / pageSize) || 1
+
+  const paginatedMatrixRows = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return matrixRows.slice(start, start + pageSize)
+  }, [matrixRows, currentPage, pageSize])
 
   const criticos = filtered.filter((r) => semaforoCPK(r.cpk) === "red").length
 
@@ -91,6 +168,7 @@ export default function AnalisisCPK() {
   async function handleExportExcel() {
     const chartImgUrl = renderCpkStackedBars(trendData, { title: `Distribución de Estados CPK por ${filters.group}` })
     
+    // Se mantiene 'matrixRows' completo para exportar la totalidad de la matriz a Excel
     await exportMatrixReport({
       filename: `analisis_cpk_matriz_${filters.group}.xlsx`,
       title: `Reporte de Evolución Cruzada CPK — Agrupación: ${filters.group}`,
@@ -106,35 +184,52 @@ export default function AnalisisCPK() {
 
   return (
     <div onMouseMove={(e) => hover?.record && setHover((h) => h ? { ...h, x: e.clientX, y: e.clientY } : null)}>
-      <AdvancedFilters state={filters} setState={setFilters} data={cpk} />
+      
+      {/* 1. Filtros avanzados */}
+      <div style={{ position: "relative" }}>
+        <AdvancedFilters state={filters} setState={setFilters} data={cpk} />
+        
+        <button 
+          className="btn btn-ghost btn-sm" 
+          onClick={fetchCpkData} 
+          title="Recargar Cpk"
+          style={{ position: "absolute", top: 12, right: 12 }}
+        >
+          <RefreshCw size={14} className={loading ? "spin" : ""} />
+        </button>
+      </div>
 
-      <div className="kpi-row" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
-        <div className="kpi"><div className="kpi-label">Registros</div><div className="kpi-value">{filtered.length}</div></div>
+      {/* 2. Fila de KPIs */}
+      <div className="kpi-row" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginTop: "16px" }}>
+        <div className="kpi"><div className="kpi-label">Registros</div><div className="kpi-value">{loading ? "..." : filtered.length}</div></div>
         <div className="kpi">
           <div className="kpi-label">Características críticas</div>
-          <div className="kpi-value" style={{ color: criticos ? "var(--sem-red)" : "var(--text)" }}>{criticos}</div>
+          <div className="kpi-value" style={{ color: criticos ? "var(--sem-red)" : "var(--text)" }}>{loading ? "..." : criticos}</div>
         </div>
         <div className="kpi"><div className="kpi-label">Agrupación</div><div className="kpi-value" style={{ fontSize: 20, textTransform: "capitalize" }}>{filters.group}</div></div>
       </div>
 
-      <div className="chart-card mb-4">
+      {error && <div className="card p-4 style-error mb-4 mt-4">{error}</div>}
+
+      {/* 3. Gráfica de Evolución */}
+      <div className="chart-card mb-4 mt-4">
         <h3 style={{ margin: "0 0 4px 0" }}>Evolución de CPK</h3>
         <div className="chart-sub" style={{ fontSize: "14px", color: "var(--text-muted)", fontWeight: "500" }}>
-          {componenteDinamico} | CTQs Evolution 2026
+          {componenteDinamico} | CTQs Evolution
         </div>
         {trendData.length > 0 ? <CpkTrendChart data={trendData} height={340} /> : <div className="empty-state">Sin datos para el rango seleccionado.</div>}
       </div>
 
       <div className="row-between mb-4">
         <span className="text-muted" style={{ fontSize: 13 }}>
-          {matrixRows.length} características cruzadas en {timeColumns.length} columnas de tiempo. Pasa el cursor sobre el valor para previsualizar; haz clic para pantalla completa.
+          {loading ? "Cargando matriz..." : `${matrixRows.length} características cruzadas en ${timeColumns.length} columnas de tiempo. Pasa el cursor sobre el valor para previsualizar; haz clic para pantalla completa.`}
         </span>
         <button className="btn btn-excel" onClick={handleExportExcel} disabled={matrixRows.length === 0}>
           <FileSpreadsheet size={16} /> Exportar Matriz a Excel
         </button>
       </div>
 
-      {/* Tabla Matricial Dinámica Actualizada */}
+      {/* 4. Tabla Matricial Dinámica Paginada */}
       <div className="table-wrap">
         <table>
           <thead>
@@ -142,19 +237,20 @@ export default function AnalisisCPK() {
               <th>Familia</th>
               <th>Componente</th>
               <th>Característica</th>
-              <th>Máquina</th> {/* Cabecera de Columna Agregada */}
+              <th>Máquina</th>
               {timeColumns.map((col) => (
                 <th key={col.key} style={{ textAlign: "center", minWidth: 80 }}>{col.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {matrixRows.map((row, rIdx) => (
+            {/* Se renderiza únicamente la página activa: 'paginatedMatrixRows' */}
+            {paginatedMatrixRows.map((row, rIdx) => (
               <tr key={rIdx}>
                 <td>{row.familia}</td>
                 <td>{row.componente}</td>
                 <td style={{ fontWeight: 500, color: "var(--text-accent)" }}>{row.caracteristica}</td>
-                <td style={{ fontWeight: 500, color: "var(--text-muted)" }}>{row.maquina}</td> {/* Celda de Máquina Agregada */}
+                <td style={{ fontWeight: 500, color: "var(--text-muted)" }}>{row.maquina}</td>
                 {timeColumns.map((col) => {
                   const item = row.valoresPorPeriodo[col.key]
                   if (!item) return <td key={col.key} style={{ textAlign: "center", color: "#ccc", background: "#fafafa" }}>-</td>
@@ -178,7 +274,7 @@ export default function AnalisisCPK() {
                 })}
               </tr>
             ))}
-            {matrixRows.length === 0 && (
+            {!loading && matrixRows.length === 0 && (
               <tr>
                 <td colSpan={4 + timeColumns.length}>
                   <div className="empty-state">No hay datos de CPK que coincidan con los filtros.</div>
@@ -189,7 +285,53 @@ export default function AnalisisCPK() {
         </table>
       </div>
 
-      {/* Tooltip Flotante */}
+      {/* 5. CONTROLES DE PAGINACIÓN */}
+      {!loading && matrixRows.length > 0 && (
+        <div className="row-between mt-4" style={{ alignItems: "center" }}>
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 13 }}>Mostrar</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(Number(e.target.value))
+                setCurrentPage(1)
+              }}
+              className="form-select"
+              style={{ width: "auto", padding: "4px 8px" }}
+            >
+              <option value={5}>5</option>
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+            </select>
+            <span style={{ fontSize: 13 }}>filas por página</span>
+          </div>
+
+          <div className="row" style={{ gap: 8, alignItems: "center" }}>
+            <span style={{ fontSize: 13, marginRight: 8 }}>
+              Página <strong>{currentPage}</strong> de <strong>{totalPages}</strong>
+            </span>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setCurrentPage((p) => Math.max(p - 1, 1))}
+              disabled={currentPage === 1}
+              style={{ padding: "6px 12px" }}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setCurrentPage((p) => Math.min(p + 1, totalPages))}
+              disabled={currentPage === totalPages}
+              style={{ padding: "6px 12px" }}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Tooltip Flotante */}
       {hover?.record && (
         <div
           className="cpk-tooltip"
