@@ -1,9 +1,11 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+dotenv.config();
 import procedureRouter from './services/procedure.router'
 import frecuenciasRouter from './services/frecuencias';
 import cpkRouter from './services/cpk';
+import whrsRouter from './services/Whours';
 
 
 const app = express();
@@ -19,6 +21,7 @@ app.get('/api', (req, res) =>{
 app.use('/api/procedure', procedureRouter);
 app.use('/api/frecuencias', frecuenciasRouter);
 app.use('/api/cpk', cpkRouter);
+app.use('/api', whrsRouter);
 
 
 app.listen(PORT, () => {

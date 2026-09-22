@@ -12,7 +12,9 @@ const dbConfig: mssql.config = {
     encrypt: false,               // Desactivado para red local / IP directa
     trustServerCertificate: true, // Permite certificados autofirmados
     enableArithAbort: true
-  }
+  },
+  requestTimeout:60000,
+  connectionTimeout:15000,
 };
 
 

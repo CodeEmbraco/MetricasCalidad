@@ -59,6 +59,51 @@ export default function CapturaForm() {
       })
   }, [form.fecha])
 
+  /* ========================================================================
+     LÓGICA PREPARADA PARA HOSTEANDO / CONSUMO AUTOMÁTICO DE HORAS TRABAJADAS
+     Descomentar este bloque cuando el servicio de horas en producción esté listo.
+     ======================================================================== */
+  /*
+  useEffect(() => {
+    // Solo consultar si hay fecha y componente seleccionado
+    if (!form.fecha || !form.componente) return
+
+    const obtenerHorasAutomaticas = async () => {
+      try {
+        // Ajusta la URL al endpoint de producción o variable de entorno
+        const res = await fetch(`http://localhost:3001/api/whours?fecha=${form.fecha}&componente=${encodeURIComponent(form.componente)}`)
+        if (!res.ok) throw new Error("No se pudieron obtener las horas trabajadas")
+        
+        const data = await res.json()
+
+        // Ejemplo: Si la API devuelve { horasTotales: 7.5 } o { horas: 7, minutos: 30 }
+        if (data && data.horasTotales !== undefined) {
+          const totalMin = Math.round(data.horasTotales * 60)
+          const hh = Math.floor(totalMin / 60)
+          const mm = totalMin % 60
+
+          setForm((prev) => ({
+            ...prev,
+            horas: String(hh),
+            minutos: String(mm),
+          }))
+        } else if (data.horas !== undefined && data.minutos !== undefined) {
+          setForm((prev) => ({
+            ...prev,
+            horas: String(data.horas),
+            minutos: String(data.minutos),
+          }))
+        }
+      } catch (err) {
+        console.error("Error al obtener horas automáticas:", err)
+      }
+    }
+
+    obtenerHorasAutomaticas()
+  }, [form.fecha, form.componente])
+  */
+  /* ======================================================================== */
+
   // 2. Extraer Familias disponibles dinámicamente desde SQL
   const familiasOptions = useMemo(() => {
     if (!apiData || !apiData.familias) return []
@@ -74,14 +119,18 @@ export default function CapturaForm() {
   // 3. Extraer Componentes únicos de la Familia seleccionada
   const componentesOptions = useMemo(() => {
     if (!form.familia) return []
-    const componentes = registrosFamilia.map((r) => r.Producto_SKU_PART_DAT)
+    const componentes = registrosFamilia.map((r) => r.NombreComponente || r.Producto_SKU_PART_DAT)
     return [...new Set(componentes)]
   }, [registrosFamilia, form.familia])
 
   // Registros filtrados por Familia y Componente
   const registrosComponente = useMemo(() => {
     if (!form.componente) return []
-    return registrosFamilia.filter((r) => r.Producto_SKU_PART_DAT === form.componente)
+    return registrosFamilia.filter(
+      (r) =>
+        r.NombreComponente === form.componente ||
+        r.Producto_SKU_PART_DAT === form.componente
+    )
   }, [registrosFamilia, form.componente])
 
   // 4. Extraer Máquinas/Procesos únicos del Componente seleccionado
@@ -115,7 +164,7 @@ export default function CapturaForm() {
     setForm((f) => {
       const next = { ...f, [field]: value }
 
-      // Limpieza en cascada adecuada
+      // Limpieza en cascada
       if (field === "fecha") {
         next.familia = ""
         next.componente = ""
@@ -163,7 +212,6 @@ export default function CapturaForm() {
 
     setSubmitting(true)
 
-    // Armamos el objeto con métricas listas para la base de datos
     const payload = {
       ...form,
       totalMuestras,
@@ -180,7 +228,6 @@ export default function CapturaForm() {
 
       if (!response.ok) throw new Error("Error al guardar en el servidor")
 
-      // Guardado local opcional de respaldo
       addFrecuencia(buildFrecuenciaRecord(form))
 
       setForm({
@@ -312,7 +359,7 @@ export default function CapturaForm() {
             />
           </div>
 
-          {/* Horas reales */}
+          {/* Horas reales (Manual por ahora) */}
           <div className="field">
             <label>
               Horas Reales de Trabajo <span className="req">*</span>

@@ -17,7 +17,7 @@ router.get('/', async (req: Request, res: Response) => {
     
     // 1. Ejecutamos el Stored Procedure
     const result = await pool.request()
-      .input('FechaBuscada', mssql.Date, fecha as string)
+      .input('FechaBuscada', mssql.VarChar(10), fecha as string)
       .execute('dbo.sp_ObtenerReporteMediciones');
 
     const filasPlanas = result.recordset;
@@ -40,9 +40,13 @@ router.get('/', async (req: Request, res: Response) => {
       familias
     });
 
-  } catch (error) {
-    console.error('Error al obtener mediciones:', error);
-    return res.status(500).json({ error: 'Error al consultar la base de datos' });
+  } catch (error: any) {
+  console.error('--- ERROR EN BACKEND ---');
+  console.error(error);
+   return res.status(500).json({ 
+    error: 'Error al consultar la base de datos',
+    mensajeReal: error.message, // Esto te dirá la causa exacta en la respuesta HTTP
+    detalles: error });
   }
 });
 
