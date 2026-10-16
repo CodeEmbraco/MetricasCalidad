@@ -117,7 +117,7 @@ export default function AdvancedFilters({ state, setState, data = [], showHora =
           </div>
 
           <MultiSelect
-            label="Familia"
+            label="Linea"
             options={opcionesFamilias}
             value={state.familias}
             onChange={handleFamiliaChange}
@@ -125,7 +125,7 @@ export default function AdvancedFilters({ state, setState, data = [], showHora =
           />
 
           <MultiSelect
-            label="Componente"
+            label="Numero de Parte"
             options={opcionesComponentes}
             value={state.componentes}
             onChange={handleComponenteChange}

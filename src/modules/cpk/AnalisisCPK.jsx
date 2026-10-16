@@ -234,7 +234,7 @@ export default function AnalisisCPK() {
         <table>
           <thead>
             <tr>
-              <th>Familia</th>
+              <th>Linea</th>
               <th>Componente</th>
               <th>Característica</th>
               <th>Máquina</th>

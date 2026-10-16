@@ -1,6 +1,5 @@
 import { useTheme } from "../context/ThemeContext.jsx"
-import { Gauge, Activity, FileBarChart, Sun, Moon, RefreshCw } from "lucide-react"
-import { resetData } from "../data/store.js"
+import { Gauge, Activity, FileBarChart, Sun, Moon, LogOut } from "lucide-react"
 
 const MODULES = [
   { id: "frecuencia", label: "Frecuencia de Medición", icon: Gauge },
@@ -14,7 +13,7 @@ const TITLES = {
   reportes: { t: "Reportes Consolidados", s: "Analítica unificada para la toma de decisiones" },
 }
 
-export default function Layout({ active, onChange, children }) {
+export default function Layout({ active, onChange, children, onLogout, isAuthenticated }) {
   const { theme, toggle } = useTheme()
   const title = TITLES[active]
 
@@ -55,10 +54,28 @@ export default function Layout({ active, onChange, children }) {
             <h1>{title.t}</h1>
             <div className="topbar-sub">{title.s}</div>
           </div>
-          <button className="theme-toggle" onClick={toggle} aria-label="Cambiar tema">
-            {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
-            {theme === "light" ? "Modo Oscuro" : "Modo Claro"}
-          </button>
+          
+          {/* Contenedor derecho de la Topbar */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button className="theme-toggle" onClick={toggle} aria-label="Cambiar tema">
+              {theme === "light" ? <Moon size={16} /> : <Sun size={16} />}
+              {theme === "light" ? "Modo Oscuro" : "Modo Claro"}
+            </button>
+
+            {/* Botón de Cerrar Sesión (Solo aparece si está autenticado) */}
+            {isAuthenticated && (
+              <button 
+                className="theme-toggle" 
+                onClick={onLogout} 
+                aria-label="Cerrar sesión"
+                style={{ color: "var(--sem-red)", borderColor: "var(--border)" }}
+                title="Cerrar sesión"
+              >
+                <LogOut size={16} />
+                <span>Salir</span>
+              </button>
+            )}
+          </div>
         </header>
         <main className="content">{children}</main>
       </div>

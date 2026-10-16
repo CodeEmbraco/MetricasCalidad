@@ -263,7 +263,7 @@ export default function ConsultaPanel() {
 
             {/* MultiSelects Dinámicos con datos de SQL */}
             <MultiSelect
-              label="Familia"
+              label="Linea"
               options={familiasOptions}
               value={familias}
               onChange={setFamilias}
@@ -304,7 +304,7 @@ export default function ConsultaPanel() {
         <table>
           <thead>
             <tr>
-              <th>Familia</th>
+              <th>Linea</th>
               <th>Componente</th>
               <th>Característica</th>
               <th>Máquina</th>

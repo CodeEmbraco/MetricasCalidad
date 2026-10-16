@@ -269,7 +269,7 @@ export default function CapturaForm() {
           {/* 2. Familia */}
           <div className="field">
             <label>
-              Familia <span className="req">*</span> {loadingApi && <RefreshCw size={12} className="spin" />}
+              Linea <span className="req">*</span> {loadingApi && <RefreshCw size={12} className="spin" />}
             </label>
             <select
               value={form.familia}
@@ -291,7 +291,7 @@ export default function CapturaForm() {
           {/* 3. Componente */}
           <div className="field">
             <label>
-              Componente <span className="req">*</span>
+              Numero de Parte <span className="req">*</span>
             </label>
             <select
               value={form.componente}
